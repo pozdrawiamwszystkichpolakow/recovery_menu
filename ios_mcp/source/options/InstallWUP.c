@@ -58,13 +58,7 @@ void option_InstallWUP(void)
         (uint32_t)(info.titleId >> 32), (uint32_t)(info.titleId & 0xFFFFFFFFU));
     index += CHAR_SIZE_DRC_Y + 4;
 
-    static const Menu installWupOptions[] = {
-        {"Cancel", {0} },
-        {"Install", {0} },
-    };
-    int selected = drawMenu("Install WUP",
-        installWupOptions, ARRAY_SIZE(installWupOptions), 0,
-        MenuFlag_NoClearScreen, 16, index);
+    int selected = 1; // auto-confirm install (no button input)
     if (selected == 0) {
         IOS_Close(mcpHandle);
         return;
@@ -146,7 +140,7 @@ void option_InstallWUP(void)
         setNotificationLED(NOTIF_LED_PURPLE, 0);
         gfx_set_font_color(COLOR_SUCCESS);
         gfx_printf(16, index, 0, "Done!");
-        waitButtonInput();
+        usleep(5 * 1000 * 1000); // wait 5s instead of button press
     }
 
     IOS_JoinThread(callbackThreadId, NULL);

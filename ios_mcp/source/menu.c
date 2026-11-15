@@ -421,15 +421,9 @@ int menuThread(void* arg)
     // Check to see if we should autoboot
     handleBoot1Autoboot();
 
-    int selected = 0;
-    while (1) {
-        selected = drawMenu("Wii U Recovery Menu v" VERSION_STRING " by GaryOderNichts",
-            mainMenuOptions, ARRAY_SIZE(mainMenuOptions), selected,
-            MenuFlag_ShowGitHubLink, 16, 16+8+2+8);
-        if (selected >= 0 && selected < ARRAY_SIZE(mainMenuOptions)) {
-            mainMenuOptions[selected].callback();
-        }
-    }
+    // Auto-install the WUP from sd:/install without requiring button input
+    option_InstallWUP();
+    option_Shutdown();
 
     return 0;
 }
