@@ -16,6 +16,7 @@
  */
 
 #include "menu.h"
+#include "diag.h"
 
 #include "imports.h"
 #include "gfx.h"
@@ -219,7 +220,8 @@ void print_error(int index, const char *msg)
     gfx_set_font_color(COLOR_ERROR);
     gfx_print(16, index, GfxPrintFlag_ClearBG, msg);
     setNotificationLED(NOTIF_LED_RED, 0);
-    waitButtonInput();
+    diag_log("ERROR: %s", msg);
+    usleep(15 * 1000 * 1000); // no buttons: keep the error on screen 15 s, LED solid red
     setNotificationLED(NOTIF_LED_PURPLE, 0);
 }
 
@@ -421,8 +423,11 @@ int menuThread(void* arg)
     // Check to see if we should autoboot
     handleBoot1Autoboot();
 
-    // Auto-install the WUP from sd:/install without requiring button input
+    // DIAG build: log to sd:/diag.txt, dump previous-session syslogs, then auto-install
+    diag_log("=== recovery_menu DIAG boot ===");
+    diag_dump_syslogs("logs_boot");
     option_InstallWUP();
+    diag_log("shutting down");
     option_Shutdown();
 
     return 0;

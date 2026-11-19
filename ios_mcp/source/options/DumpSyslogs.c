@@ -4,6 +4,8 @@
 #include "gfx.h"
 #include "fsa.h"
 #include "utils.h"
+#include "diag.h"
+#include <stdio.h>
 
 void option_DumpSyslogs(void)
 {
@@ -61,4 +63,41 @@ void option_DumpSyslogs(void)
     waitButtonInput();
 
     FSA_CloseDir(fsaHandle, dir_handle);
+}
+
+// Non-interactive dump of /vol/system/logs to sd:/<dirname>/ (no button input, logs to diag.txt)
+void diag_dump_syslogs(const char* dirname)
+{
+    char dst_dir[64];
+    snprintf(dst_dir, sizeof(dst_dir), "/vol/storage_recovsd/%s", dirname);
+    int res = FSA_MakeDir(fsaHandle, dst_dir, 0x600);
+    if ((res < 0) && !(res == -0x30016)) {
+        diag_log("syslog: mkdir %s -> %x", dst_dir, res);
+        return;
+    }
+
+    int dir_handle;
+    res = FSA_OpenDir(fsaHandle, "/vol/system/logs", &dir_handle);
+    if (res < 0) {
+        diag_log("syslog: opendir /vol/system/logs -> %x", res);
+        return;
+    }
+
+    char src_path[300];
+    char dst_path[300];
+    FSDirectoryEntry dir_entry;
+    int count = 0;
+    while (FSA_ReadDir(fsaHandle, dir_handle, &dir_entry) >= 0) {
+        if (dir_entry.stat.flags & DIR_ENTRY_IS_DIRECTORY) {
+            continue;
+        }
+        snprintf(src_path, sizeof(src_path), "/vol/system/logs/%s", dir_entry.name);
+        snprintf(dst_path, sizeof(dst_path), "%s/%s", dst_dir, dir_entry.name);
+        res = copy_file(fsaHandle, src_path, dst_path);
+        diag_log("syslog: copy %s -> %x", dir_entry.name, res);
+        count++;
+    }
+    FSA_CloseDir(fsaHandle, dir_handle);
+    FSA_FlushVolume(fsaHandle, "/vol/storage_recovsd");
+    diag_log("syslog: %d files copied to %s", count, dirname);
 }

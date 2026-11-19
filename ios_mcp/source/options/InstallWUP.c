@@ -6,6 +6,9 @@
 #include "imports.h"
 #include "utils.h"
 #include <unistd.h>
+#include <string.h>
+#include "diag.h"
+#include "options.h"
 
 static int callbackQueue = -1;
 static uint8_t callbackThreadStack[0x200] __attribute__((aligned(0x20)));
@@ -35,7 +38,9 @@ void option_InstallWUP(void)
 
     uint32_t index = 16 + 8 + 2 + 8;
 
+    diag_log("InstallWUP start");
     int mcpHandle = IOS_Open("/dev/mcp", 0);
+    diag_log("IOS_Open /dev/mcp -> %x", mcpHandle);
     if (mcpHandle < 0) {
         printf_error(index, "Failed to open /dev/mcp: %x", mcpHandle);
         return;
@@ -46,6 +51,8 @@ void option_InstallWUP(void)
 
     MCPInstallInfo info;
     int res = MCP_InstallGetInfo(mcpHandle, "/vol/storage_recovsd/install", &info);
+    diag_log("MCP_InstallGetInfo -> %x title %08lx-%08lx", res,
+        (uint32_t)(info.titleId >> 32), (uint32_t)(info.titleId & 0xFFFFFFFFU));
     if (res < 0) {
         IOS_Close(mcpHandle);
         gfx_print(16, index, 0, "Make sure to place a valid signed WUP directly in 'sd:/install'");
@@ -74,12 +81,14 @@ void option_InstallWUP(void)
 
     // only install to NAND
     res = MCP_InstallSetTargetDevice(mcpHandle, 0);
+    diag_log("SetTargetDevice(0) -> %x", res);
     if (res < 0) {
         IOS_Close(mcpHandle);
         printf_error(index, "MCP_InstallSetTargetDevice: %x", res);
         return;
     }
     res = MCP_InstallSetTargetUsb(mcpHandle, 0);
+    diag_log("SetTargetUsb(0) -> %x", res);
     if (res < 0) {
         IOS_Close(mcpHandle);
         printf_error(index, "MCP_InstallSetTargetUsb: %x", res);
@@ -112,6 +121,7 @@ void option_InstallWUP(void)
     asyncResult = -1;
     asyncPending = 1;
     res = MCP_InstallTitleAsync(mcpHandle, "/vol/storage_recovsd/install", callbackQueue);
+    diag_log("MCP_InstallTitleAsync -> %x", res);
     if (res < 0) {
         // Send a NULL message and wait for the thread to stop
         IOS_SendMessage(callbackQueue, 0, IOS_MESSAGE_FLAGS_NONE);
@@ -123,15 +133,42 @@ void option_InstallWUP(void)
         return;
     }
 
+    uint32_t loops = 0, lastKiB = 0xFFFFFFFFu, stallLoops = 0, stallDumped = 0;
     while (asyncPending) {
         MCPInstallProgress progress;
+        memset(&progress, 0, sizeof(progress));
         res = MCP_InstallGetProgress(mcpHandle, &progress);
+        uint32_t curKiB = (uint32_t) (progress.sizeProgress / 1024llu);
         if (res >= 0) {
-            gfx_printf(16, index, GfxPrintFlag_ClearBG, "Installing... (%lu KiB / %lu KiB)", (uint32_t) (progress.sizeProgress / 1024llu), (uint32_t) (progress.sizeTotal / 1024llu));
+            gfx_printf(16, index, GfxPrintFlag_ClearBG, "Installing... (%lu KiB / %lu KiB)", curKiB, (uint32_t) (progress.sizeTotal / 1024llu));
         }
 
+        // log every ~2 s (40 * 50 ms): heartbeat shows whether IOSU is alive while MCP is stuck
+        if ((loops % 40) == 0) {
+            diag_log("t=%lus res=%x inProg=%lu %lu/%lu KiB contents %lu/%lu",
+                loops / 20, res, progress.inProgress, curKiB,
+                (uint32_t) (progress.sizeTotal / 1024llu),
+                progress.contentsProgress, progress.contentsTotal);
+        }
+
+        if (curKiB == lastKiB) {
+            stallLoops++;
+        } else {
+            stallLoops = 0;
+            lastKiB = curKiB;
+        }
+        // stuck for ~120 s: try to grab the system logs once while still running
+        if (stallLoops == 2400 && !stallDumped) {
+            stallDumped = 1;
+            diag_log("STALL 120s at %lu KiB -> dumping syslogs", curKiB);
+            diag_dump_syslogs("logs_stall");
+            diag_log("syslog dump after stall done");
+        }
+
+        loops++;
         usleep(50 * 1000);
     }
+    diag_log("install finished asyncResult=%x after %lus", asyncResult, loops / 20);
     index += CHAR_SIZE_DRC_Y + 4;
 
     if (asyncResult < 0) {
