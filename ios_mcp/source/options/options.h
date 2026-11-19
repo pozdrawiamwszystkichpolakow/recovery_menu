@@ -3,6 +3,7 @@
 #include "DebugSystemRegion.h"
 #include "DumpOtpAndSeeprom.h"
 #include "DumpSyslogs.h"
+#include "DumpTitles.h"
 #include "EditParental.h"
 #include "InstallWUP.h"
 #include "LoadBoot1Payload.h"
