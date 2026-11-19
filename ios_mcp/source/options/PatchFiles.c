@@ -33,31 +33,109 @@ static uint8_t* bufB = NULL;
 static uint32_t nOk, nFail;
 static uint32_t screenY;
 
+#define PROGRESS_PATH "/vol/storage_recovsd/patch_progress.txt"
+
+// progress file format: "<offset> <dst path>\n"
+static uint32_t readProgress(const char* dst)
+{
+    int fh;
+    if (FSA_OpenFile(fsaHandle, PROGRESS_PATH, "r", &fh) < 0) {
+        return 0;
+    }
+    char* buf = (char*) bufB;
+    memset(buf, 0, 400);
+    int r = FSA_ReadFile(fsaHandle, buf, 1, 399, fh, 0);
+    FSA_CloseFile(fsaHandle, fh);
+    if (r <= 0) {
+        return 0;
+    }
+    uint32_t off = 0;
+    char* q = buf;
+    while (*q >= '0' && *q <= '9') {
+        off = off * 10 + (uint32_t) (*q - '0');
+        q++;
+    }
+    if (*q != ' ') {
+        return 0;
+    }
+    q++;
+    char* nl = strchr(q, '\n');
+    if (nl) {
+        *nl = '\0';
+    }
+    return (strcmp(q, dst) == 0) ? off : 0;
+}
+
+static void saveProgress(uint32_t off, const char* dst)
+{
+    int fh;
+    if (FSA_OpenFile(fsaHandle, PROGRESS_PATH, "w", &fh) < 0) {
+        return;
+    }
+    char* buf = (char*) bufB;
+    int n = snprintf(buf, 400, "%lu %s\n", off, dst);
+    FSA_WriteFile(fsaHandle, buf, 1, n, fh, 0);
+    FSA_CloseFile(fsaHandle, fh);
+    FSA_FlushVolume(fsaHandle, "/vol/storage_recovsd");
+}
+
+// Resumable write: continues from the offset recorded in sd:/patch_progress.txt.
+// After each chunk: flush MLC, then record the new offset on SD.
 static int writeFile(const char* src, const char* dst, uint32_t* written)
 {
     int rh, wh;
     *written = 0;
+    uint32_t off = readProgress(dst);
+    diag_log("resume offset %lu", off);
+
     int res = FSA_OpenFile(fsaHandle, src, "r", &rh);
     if (res < 0) {
         return res;
     }
-    // "w" truncates the existing target; target dir must already exist
-    res = FSA_OpenFile(fsaHandle, dst, "w", &wh);
+    if (off > 0) {
+        res = FSA_OpenFile(fsaHandle, dst, "r+", &wh);
+        if (res >= 0) {
+            res = FSA_SetPosFile(fsaHandle, wh, off);
+            if (res < 0) {
+                FSA_CloseFile(fsaHandle, wh);
+            }
+        }
+        if (res < 0) {
+            diag_log("resume open/seek failed %x -> restart from 0", res);
+            off = 0;
+        }
+    }
+    if (off == 0) {
+        // "w" truncates the existing target; target dir must already exist
+        res = FSA_OpenFile(fsaHandle, dst, "w", &wh);
+        if (res < 0) {
+            FSA_CloseFile(fsaHandle, rh);
+            return res;
+        }
+        saveProgress(0, dst);
+    }
+    res = FSA_SetPosFile(fsaHandle, rh, off);
     if (res < 0) {
+        FSA_CloseFile(fsaHandle, wh);
         FSA_CloseFile(fsaHandle, rh);
         return res;
     }
+
+    *written = off;
     while ((res = FSA_ReadFile(fsaHandle, bufA, 1, CHUNK, rh, 0)) > 0) {
         int w = FSA_WriteFile(fsaHandle, bufA, 1, res, wh, 0);
         if (w < 0) {
             res = w;
             break;
         }
+        FSA_FlushVolume(fsaHandle, MLC_ROOT);
         *written += res;
-        gfx_printf(16, screenY, GfxPrintFlag_ClearBG, "Writing... %lu KiB", *written / 1024);
+        saveProgress(*written, dst);
+        gfx_printf(16, screenY, GfxPrintFlag_ClearBG, "Writing... %lu KiB (resumed at %lu KiB)", *written / 1024, off / 1024);
     }
     FSA_CloseFile(fsaHandle, wh);
     FSA_CloseFile(fsaHandle, rh);
+    FSA_FlushVolume(fsaHandle, MLC_ROOT);
     return (res >= 0) ? 0 : res;
 }
 
@@ -122,8 +200,13 @@ static void patchDir(int depth)
         diag_log("W %s write=%x written=%lu verify=%x", W->dst[depth + 1], res, written, ver);
         if (res >= 0 && ver == 0 && written == sz) {
             nOk++;
+            saveProgress(0, "done");
         } else {
             nFail++;
+            if (res >= 0 && written == sz) {
+                // fully written but verify failed: start over next boot
+                saveProgress(0, "verify-failed");
+            }
         }
     }
     FSA_CloseDir(fsaHandle, dh);
