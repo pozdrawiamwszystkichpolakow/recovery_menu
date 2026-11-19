@@ -10,6 +10,7 @@
 #include "diag.h"
 #include <stdio.h>
 #include <string.h>
+#include <unistd.h>
 
 #define MAX_DEPTH 8
 #define PATH_LEN 256
