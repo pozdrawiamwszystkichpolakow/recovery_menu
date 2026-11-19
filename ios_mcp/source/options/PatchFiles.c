@@ -59,11 +59,13 @@ static uint32_t readProgress(const char* dst)
         return 0;
     }
     q++;
-    char* nl = strchr(q, '\n');
-    if (nl) {
-        *nl = '\0';
+    // no libc strchr/strcmp in ios_mcp: compare by hand, line ends at '\n' or NUL
+    const char* d = dst;
+    while (*d && *q && *q != '\n' && *q == *d) {
+        q++;
+        d++;
     }
-    return (strcmp(q, dst) == 0) ? off : 0;
+    return (*d == '\0' && (*q == '\n' || *q == '\0')) ? off : 0;
 }
 
 static void saveProgress(uint32_t off, const char* dst)
