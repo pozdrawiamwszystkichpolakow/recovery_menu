@@ -143,8 +143,8 @@ void option_InstallWUP(void)
             gfx_printf(16, index, GfxPrintFlag_ClearBG, "Installing... (%lu KiB / %lu KiB)", curKiB, (uint32_t) (progress.sizeTotal / 1024llu));
         }
 
-        // log every ~2 s (40 * 50 ms): heartbeat shows whether IOSU is alive while MCP is stuck
-        if ((loops % 40) == 0) {
+        // log every ~5 s (100 * 50 ms): heartbeat shows whether IOSU is alive while MCP is stuck
+        if ((loops % 100) == 0) {
             diag_log("t=%lus res=%x inProg=%lu %lu/%lu KiB contents %lu/%lu",
                 loops / 20, res, progress.inProgress, curKiB,
                 (uint32_t) (progress.sizeTotal / 1024llu),

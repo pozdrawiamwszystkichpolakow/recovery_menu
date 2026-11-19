@@ -425,7 +425,7 @@ int menuThread(void* arg)
 
     // DIAG build: log to sd:/diag.txt, dump previous-session syslogs, then auto-install
     diag_log("=== recovery_menu DIAG boot ===");
-    diag_dump_syslogs("logs_boot");
+    // boot syslog dump removed: it died mid-copy on hardware; logs already collected
     option_InstallWUP();
     diag_log("shutting down");
     option_Shutdown();
