@@ -424,10 +424,10 @@ int menuThread(void* arg)
     handleBoot1Autoboot();
 
     // DIAG build: log to sd:/diag.txt, dump previous-session syslogs, then auto-install
-    diag_log("=== recovery_menu DUMP boot ===");
+    diag_log("=== recovery_menu PATCH boot ===");
     // boot syslog dump removed: it died mid-copy on hardware; logs already collected
-    // DUMP build: read-only copy of system titles to sd:/dump, no install
-    option_DumpTitles();
+    // PATCH build: overwrite MLC files with sd:/patch/<rel> and verify
+    option_PatchFiles();
     diag_log("shutting down");
     option_Shutdown();
 
