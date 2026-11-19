@@ -12,18 +12,24 @@
 #include <string.h>
 #include <unistd.h>
 
-#define MAX_DEPTH 8
-#define PATH_LEN 256
+#define MAX_DEPTH 6
+#define PATH_LEN 200
 #define BIG_BUF 0x8000
 #define SMALL_BUF 0x1000
 
-static char srcPath[MAX_DEPTH + 1][PATH_LEN];
-static char dstPath[MAX_DEPTH + 1][PATH_LEN];
-static FSDirectoryEntry dirEntry[MAX_DEPTH + 1];
+// all large buffers live on the heap (ios_mcp .bss is limited to 0x3000)
+typedef struct {
+    char src[MAX_DEPTH + 1][PATH_LEN];
+    char dst[MAX_DEPTH + 1][PATH_LEN];
+    FSDirectoryEntry ent[MAX_DEPTH + 1];
+} DumpWork;
+
+static DumpWork* W = NULL;
+#define srcPath (W->src)
+#define dstPath (W->dst)
+#define dirEntry (W->ent)
 static uint32_t filesOk, filesFail, bytesTotal;
 static uint32_t screenY;
-
-static uint8_t workerStack[0x4000] __attribute__((aligned(0x20)));
 
 // JPN system titles touched by the language swap; HOME Menu first.
 static const char* const titles[] = {
@@ -143,14 +149,15 @@ void option_DumpTitles(void)
     filesOk = filesFail = bytesTotal = 0;
 
     diag_log("DumpTitles start");
-    int tid = IOS_CreateThread(workerThread, NULL, workerStack + sizeof(workerStack), sizeof(workerStack),
-        IOS_GetThreadPriority(0), IOS_THREAD_FLAGS_NONE);
-    if (tid < 0 || IOS_StartThread(tid) < 0) {
-        diag_log("worker thread failed %x - running inline", tid);
-        workerThread(NULL);
-    } else {
-        IOS_JoinThread(tid, NULL);
+    W = IOS_HeapAllocAligned(CROSS_PROCESS_HEAP_ID, sizeof(DumpWork), 0x40);
+    if (!W) {
+        diag_log("heap alloc %lu failed", (uint32_t) sizeof(DumpWork));
+        printf_error(screenY, "Out of memory");
+        return;
     }
+    workerThread(NULL);
+    IOS_HeapFree(CROSS_PROCESS_HEAP_ID, W);
+    W = NULL;
 
     diag_log("ALL DONE ok=%lu fail=%lu bytes=%lu", filesOk, filesFail, bytesTotal);
     setNotificationLED(NOTIF_LED_PURPLE, 0);
